@@ -22,8 +22,10 @@ CBitmap	ConsoleView::m_bmpOffscreen;
 CBitmap	ConsoleView::m_bmpText;
 CSize	ConsoleView::m_sizePadding(0, 0);
 
-CFont	ConsoleView::m_fontText;
-CFont	ConsoleView::m_fontTextHigh;
+// Flags for font styles. 4 possible styles with 2 flags
+#define CV_FONTSTYLE_INTENSE 1
+#define CV_FONTSTYLE_UNDERLINE 2
+CFont	ConsoleView::m_fontText[4];
 
 int		ConsoleView::m_nCharHeight(0);
 int		ConsoleView::m_nCharWidth(0);
@@ -1240,8 +1242,8 @@ void ConsoleView::SetAppActiveStatus(bool bAppActive)
 
 void ConsoleView::RecreateOffscreenBuffers()
 {
-	if (!m_fontText.IsNull())		m_fontText.DeleteObject();
-	if (!m_fontTextHigh.IsNull())	m_fontTextHigh.DeleteObject();
+	for (int i = 0; i < boost::size(m_fontText); i++)
+		if (!m_fontText[i].IsNull())		m_fontText[i].DeleteObject();
 	if (!m_backgroundBrush.IsNull())m_backgroundBrush.DeleteObject();
 	if (!m_bmpOffscreen.IsNull())	m_bmpOffscreen.DeleteObject();
 	if (!m_bmpText.IsNull())		m_bmpText.DeleteObject();
@@ -1619,8 +1621,8 @@ void ConsoleView::CreateOffscreenBitmap(CDC& cdc, const CRect& rect, CBitmap& bi
 
 bool ConsoleView::CreateFont(const wstring& strFontName)
 {
-	if (!m_fontText.IsNull()) return true;// m_fontText.DeleteObject();
-	if (!m_fontTextHigh.IsNull()) return true;// m_fontTextHigh.DeleteObject();
+	for (int i = 0; i < boost::size(m_fontText); i++)
+		if (!m_fontText[i].IsNull()) return true;// m_fontText[i].DeleteObject();
 
 	BYTE	byFontQuality = DEFAULT_QUALITY;
 
@@ -1631,46 +1633,32 @@ bool ConsoleView::CreateFont(const wstring& strFontName)
 		case fontSmoothCleartype: byFontQuality = CLEARTYPE_QUALITY;		break;
 		default : DEFAULT_QUALITY;
 	}
-	m_fontText.CreateFont(
-		-::MulDiv(m_appearanceSettings.fontSettings.dwSize , m_dcText.GetDeviceCaps(LOGPIXELSY), 72),
-		0,
-		0,
-		0,
-		m_appearanceSettings.fontSettings.bBold ? FW_BOLD : 0,
-		m_appearanceSettings.fontSettings.bItalic,
-		FALSE,
-		FALSE,
- 		DEFAULT_CHARSET,
-		OUT_DEFAULT_PRECIS,
-		CLIP_DEFAULT_PRECIS,
-		byFontQuality,
-		DEFAULT_PITCH,
-		strFontName.c_str());
-	m_fontTextHigh.CreateFont(
-		-::MulDiv(m_appearanceSettings.fontSettings.dwSize , m_dcText.GetDeviceCaps(LOGPIXELSY), 72),
-		0,
-		0,
-		0,
-		m_appearanceSettings.fontSettings.bBold ? 0 : FW_BOLD,
-		m_appearanceSettings.fontSettings.bItalic,
-		FALSE,
-		FALSE,
- 		DEFAULT_CHARSET,
-		OUT_DEFAULT_PRECIS,
-		CLIP_DEFAULT_PRECIS,
-		byFontQuality,
-		DEFAULT_PITCH,
-		strFontName.c_str());
+	for (int i = 0; i < boost::size(m_fontText); i++)
+		m_fontText[i].CreateFont(
+			-::MulDiv(m_appearanceSettings.fontSettings.dwSize , m_dcText.GetDeviceCaps(LOGPIXELSY), 72),
+			0,
+			0,
+			0,
+			m_appearanceSettings.fontSettings.bBold != ((i & CV_FONTSTYLE_INTENSE) > 0) ? FW_BOLD : 0,
+			m_appearanceSettings.fontSettings.bItalic,
+			(i & CV_FONTSTYLE_UNDERLINE) > 0,
+			FALSE,
+ 			DEFAULT_CHARSET,
+			OUT_DEFAULT_PRECIS,
+			CLIP_DEFAULT_PRECIS,
+			byFontQuality,
+			DEFAULT_PITCH,
+			strFontName.c_str());
 
 	TEXTMETRIC	textMetric;
 
-	m_dcText.SelectFont(m_fontText);
+	m_dcText.SelectFont(m_fontText[0]);
 	m_dcText.GetTextMetrics(&textMetric);
 
 	if (textMetric.tmPitchAndFamily & TMPF_FIXED_PITCH)
 	{
-		if (!m_fontText.IsNull()) m_fontText.DeleteObject();
-		if (!m_fontTextHigh.IsNull()) m_fontTextHigh.DeleteObject();
+		for (int i = 0; i < boost::size(m_fontText); i++)
+			if (!m_fontText[0].IsNull()) m_fontText[0].DeleteObject();
 		return false;
 	}
 
@@ -1950,9 +1938,9 @@ void ConsoleView::RepaintText(CDC& dc)
 	DWORD dwY			= stylesSettings.dwInsideBorder;
 	DWORD dwOffset		= 0;
 	
-	WORD attrBG;
-	bool	lastFontHigh = false;
-	dc.SelectFont(m_fontText);
+	WORD attrAll, attrFG, attrBG;
+	int	nLastFont = 0, nCurFont = 0;
+	dc.SelectFont(m_fontText[0]);
 
 	// stuff used for caching
 	int			nBkMode		= TRANSPARENT;
@@ -1976,7 +1964,11 @@ void ConsoleView::RepaintText(CDC& dc)
 		nCharWidths		= 0;
 		bTextOut		= false;
 		
-		attrBG = (m_screenBuffer[dwOffset].charInfo.Attributes & 0xFF) >> 4;
+		attrAll = m_screenBuffer[dwOffset].charInfo.Attributes;
+		attrFG = (attrAll & 0x0F);
+		attrBG = (attrAll & 0xF0) >> 4;
+		if (attrAll & COMMON_LVB_REVERSE_VIDEO)
+			std::swap(attrFG, attrBG);
 		
 		// here we decide how to paint text over the background
 		if (attrBG == 0)
@@ -1992,19 +1984,12 @@ void ConsoleView::RepaintText(CDC& dc)
 		dc.SetBkMode(nBkMode);
 		dc.SetBkColor(crBkColor);
 
-		crTxtColor		= (m_appearanceSettings.fontSettings.bUseColor || (m_screenBuffer[dwOffset].charInfo.Attributes & 0xF) == 0x7) ? m_appearanceSettings.fontSettings.crFontColor : m_consoleSettings.consoleColors[m_screenBuffer[dwOffset].charInfo.Attributes & 0xF];
+		crTxtColor		= (m_appearanceSettings.fontSettings.bUseColor || attrFG == 0x7) ? m_appearanceSettings.fontSettings.crFontColor : m_consoleSettings.consoleColors[attrFG];
 		dc.SetTextColor(crTxtColor);
-		if (m_screenBuffer[dwOffset].charInfo.Attributes & 0x8) {
-			if (!lastFontHigh) {
-				dc.SelectFont(m_fontTextHigh);
-				lastFontHigh = true;
-			}
-		}
-		else {
-			if (lastFontHigh) {
-				dc.SelectFont(m_fontText);
-				lastFontHigh = false;
-			}
+		nCurFont = (attrFG & FOREGROUND_INTENSITY ? CV_FONTSTYLE_INTENSE : 0) | (attrAll & COMMON_LVB_UNDERSCORE ? CV_FONTSTYLE_UNDERLINE : 0);
+		if (nLastFont != nCurFont) {
+			dc.SelectFont(m_fontText[nCurFont]);
+			nLastFont = nCurFont;
 		}
 
 		strText		= m_screenBuffer[dwOffset].charInfo.Char.UnicodeChar;
@@ -2022,7 +2007,11 @@ void ConsoleView::RepaintText(CDC& dc)
 				continue;
 			}
 			
-			attrBG = (m_screenBuffer[dwOffset].charInfo.Attributes & 0xFF) >> 4;
+			attrAll = m_screenBuffer[dwOffset].charInfo.Attributes;
+			attrFG = (attrAll & 0x0F);
+			attrBG = (attrAll & 0xF0) >> 4;
+			if (attrAll & COMMON_LVB_REVERSE_VIDEO)
+				std::swap(attrFG, attrBG);
 
 			if (attrBG == 0)
 			{
@@ -2046,13 +2035,18 @@ void ConsoleView::RepaintText(CDC& dc)
 				}
 			}
 
-			if (crTxtColor != ((m_appearanceSettings.fontSettings.bUseColor || (m_screenBuffer[dwOffset].charInfo.Attributes & 0xF) == 0x7) ? m_appearanceSettings.fontSettings.crFontColor : m_consoleSettings.consoleColors[m_screenBuffer[dwOffset].charInfo.Attributes & 0xF]))
+			if (!m_appearanceSettings.fontSettings.bUseColor && crTxtColor != ((attrFG == 0x7) ? m_appearanceSettings.fontSettings.crFontColor : m_consoleSettings.consoleColors[attrFG]))
 			{
-				crTxtColor = (m_appearanceSettings.fontSettings.bUseColor || (m_screenBuffer[dwOffset].charInfo.Attributes & 0xF) == 0x7) ? m_appearanceSettings.fontSettings.crFontColor : m_consoleSettings.consoleColors[m_screenBuffer[dwOffset].charInfo.Attributes & 0xF];
+				crTxtColor = (attrFG == 0x7) ? m_appearanceSettings.fontSettings.crFontColor : m_consoleSettings.consoleColors[attrFG];
 				bTextOut = true;
 			}
 
-			if (m_screenBuffer[dwOffset].charInfo.Attributes & 0x8) {
+			nCurFont = (attrFG & FOREGROUND_INTENSITY ? CV_FONTSTYLE_INTENSE : 0) | (attrAll & COMMON_LVB_UNDERSCORE ? CV_FONTSTYLE_UNDERLINE : 0);
+			// First condition is a hack to fix text alignment with mixed
+			// bold/non-bold text by outputting it character-by-character.
+			// Second is for signaling start/end of underline or any other
+			// non-color style change that may be supported in the future.
+			if (attrFG & FOREGROUND_INTENSITY || nLastFont != nCurFont) {
 				bTextOut = true;
 			}
 
@@ -2066,17 +2060,9 @@ void ConsoleView::RepaintText(CDC& dc)
 				dc.SetBkMode(nBkMode);
 				dc.SetBkColor(crBkColor);
 				dc.SetTextColor(crTxtColor);
-				if (m_screenBuffer[dwOffset].charInfo.Attributes & 0x8) {
-					if (!lastFontHigh) {
-						dc.SelectFont(m_fontTextHigh);
-						lastFontHigh = true;
-					}
-				}
-				else {
-					if (lastFontHigh) {
-						dc.SelectFont(m_fontText);
-						lastFontHigh = false;
-					}
+				if (nLastFont != nCurFont) {
+					dc.SelectFont(m_fontText[nCurFont]);
+					nLastFont = nCurFont;
 				}
 
 				strText		= m_screenBuffer[dwOffset].charInfo.Char.UnicodeChar;
@@ -2113,9 +2099,9 @@ void ConsoleView::RepaintTextChanges(CDC& dc)
 	DWORD	dwY			= stylesSettings.dwInsideBorder;
 	DWORD	dwOffset	= 0;
 	
-	WORD	attrBG;
-	bool	lastFontHigh = false;
-	dc.SelectFont(m_fontText);
+	WORD attrAll, attrFG, attrBG;
+	int	nLastFont = 0, nCurFont = 0;
+	dc.SelectFont(m_fontText[0]);
 
 	MutexLock bufferLock(m_bufferMutex);
 
@@ -2185,7 +2171,11 @@ void ConsoleView::RepaintTextChanges(CDC& dc)
 					}
 				}
 
-				attrBG = (m_screenBuffer[dwOffset].charInfo.Attributes & 0xFF) >> 4;
+				attrAll = m_screenBuffer[dwOffset].charInfo.Attributes;
+				attrFG = (attrAll & 0x0F);
+				attrBG = (attrAll & 0xF0) >> 4;
+				if (attrAll & COMMON_LVB_REVERSE_VIDEO)
+					std::swap(attrFG, attrBG);
 
 				// here we decide how to paint text over the background
 				if (attrBG == 0)
@@ -2199,18 +2189,11 @@ void ConsoleView::RepaintTextChanges(CDC& dc)
 				}
 				
 				dc.SetBkColor(m_consoleSettings.consoleColors[attrBG]);
-				dc.SetTextColor((m_appearanceSettings.fontSettings.bUseColor || (m_screenBuffer[dwOffset].charInfo.Attributes & 0xF) == 0x7) ? m_appearanceSettings.fontSettings.crFontColor : m_consoleSettings.consoleColors[m_screenBuffer[dwOffset].charInfo.Attributes & 0xF]);
-				if (m_screenBuffer[dwOffset].charInfo.Attributes & 0x8) {
-					if (!lastFontHigh) {
-						dc.SelectFont(m_fontTextHigh);
-						lastFontHigh = true;
-					}
-				}
-				else {
-					if (lastFontHigh) {
-						dc.SelectFont(m_fontText);
-						lastFontHigh = false;
-					}
+				dc.SetTextColor((m_appearanceSettings.fontSettings.bUseColor || attrFG == 0x7) ? m_appearanceSettings.fontSettings.crFontColor : m_consoleSettings.consoleColors[attrFG]);
+				nCurFont = (attrFG & FOREGROUND_INTENSITY ? CV_FONTSTYLE_INTENSE : 0) | (attrAll & COMMON_LVB_UNDERSCORE ? CV_FONTSTYLE_UNDERLINE : 0);
+				if (nLastFont != nCurFont) {
+					dc.SelectFont(m_fontText[nCurFont]);
+					nLastFont = nCurFont;
 				}
 
 				dc.ExtTextOut(dwX, dwY, ETO_CLIPPED, &rect, &(m_screenBuffer[dwOffset].charInfo.Char.UnicodeChar), 1, NULL);
