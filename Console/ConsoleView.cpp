@@ -1658,7 +1658,7 @@ bool ConsoleView::CreateFont(const wstring& strFontName)
 	if (textMetric.tmPitchAndFamily & TMPF_FIXED_PITCH)
 	{
 		for (int i = 0; i < boost::size(m_fontText); i++)
-			if (!m_fontText[0].IsNull()) m_fontText[0].DeleteObject();
+			if (!m_fontText[i].IsNull()) m_fontText[i].DeleteObject();
 		return false;
 	}
 
