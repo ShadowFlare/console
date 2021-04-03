@@ -1678,7 +1678,7 @@ void ConsoleView::InitializeScrollbars()
 {
 	SharedMemory<ConsoleParams>& consoleParams = m_consoleHandler.GetConsoleParams();
 
- 	m_bShowVScroll = m_appearanceSettings.controlsSettings.bShowScrollbars && (consoleParams->dwBufferRows > consoleParams->dwRows);
+ 	m_bShowVScroll = m_appearanceSettings.controlsSettings.bShowScrollbars /* //force scrollbars if enabled, regardless of buffer size// && (consoleParams->dwBufferRows > consoleParams->dwRows)*/;
  	m_bShowHScroll = m_appearanceSettings.controlsSettings.bShowScrollbars && (consoleParams->dwBufferColumns > consoleParams->dwColumns);
 
 //	if (m_nScrollbarStyle != FSB_REGULAR_MODE)
@@ -1702,7 +1702,7 @@ void ConsoleView::InitializeScrollbars()
 	TRACE(L"----------------------------------------------------------------\n");
 */
 
-	if (m_appearanceSettings.controlsSettings.bShowScrollbars && (consoleParams->dwBufferRows > consoleParams->dwRows))
+	if (m_bShowVScroll)
 	{
 		// set vertical scrollbar stuff
 		SCROLLINFO	si ;
@@ -1732,7 +1732,7 @@ void ConsoleView::InitializeScrollbars()
 		::FlatSB_SetScrollInfo(m_hWnd, SB_VERT, &si, TRUE);
 	}
 
-	if (m_appearanceSettings.controlsSettings.bShowScrollbars && (consoleParams->dwBufferColumns > consoleParams->dwColumns))
+	if (m_bShowHScroll)
 	{
 		// set vertical scrollbar stuff
 		SCROLLINFO	si ;
